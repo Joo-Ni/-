@@ -273,8 +273,32 @@ function drawWheel(){
 
     // text
     const mid = (start+end)/2;
+    // 기존 drawWheel 함수 안에서 "ctx.save(); ctx.translate(cx,cy);"부터 이 부분만 교체
     ctx.save();
-    ctx.translate(cx,cy);
+    ctx.translate(cx, cy);
+    ctx.rotate(mid);
+    
+    // ✅ 글자가 뒤집히지 않게 조정
+    let angleDeg = mid * 180 / Math.PI;
+    if (angleDeg > 90 && angleDeg < 270) {
+      ctx.rotate(Math.PI); // 반대 방향으로 뒤집기
+      ctx.textAlign = "right";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = "#0b1020";
+      ctx.font = "bold 18px system-ui";
+      const label = `${it.name} (${(ratio * 100).toFixed(1)}%)`;
+      ctx.fillText(label, -16, 0); // 좌우 반전 시 -16
+    } else {
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = "#0b1020";
+      ctx.font = "bold 18px system-ui";
+      const label = `${it.name} (${(ratio * 100).toFixed(1)}%)`;
+      ctx.fillText(label, 16, 0);
+    }
+    
+    ctx.restore();
+
     ctx.rotate(mid);
     ctx.textAlign="left"; ctx.textBaseline="middle";
     ctx.fillStyle = "#0b1020";
