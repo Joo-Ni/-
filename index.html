@@ -5,16 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>가중치 돌림판 (Weighted Roulette)</title>
 <style>
-  :root{
-    --bg:#0b1020; --panel:#141a2e; --accent:#6ea8fe; --muted:#9fb3c8;
-  }
+  :root{ --bg:#0b1020; --panel:#141a2e; --accent:#6ea8fe; --muted:#9fb3c8; }
   *{box-sizing:border-box}
   body{
     margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Apple SD Gothic Neo,Noto Sans KR,sans-serif;
     background:linear-gradient(180deg,#0a0f1e 0%,#0b1020 60%,#0a0f1e 100%); color:#e8f0ff;
   }
   header{padding:18px 16px 6px; text-align:center}
-  header h1{margin:0; font-size:20px; letter-spacing:.2px}
+  header h1{margin:0; font-size:20px}
   header p{margin:6px 0 0; color:var(--muted); font-size:13px}
 
   .wrap{display:grid; grid-template-columns:1fr; gap:12px; padding:12px; max-width:1000px; margin:0 auto}
@@ -55,19 +53,20 @@
   .rows{margin-top:8px; border-top:1px dashed rgba(255,255,255,.08); padding-top:8px; max-height:50vh; overflow:auto}
   .row{display:grid; grid-template-columns:1fr 110px; gap:8px; align-items:center; margin:6px 0;}
   .row input{padding:9px 10px}
-  .name-readonly{
-    background:#0f1529; color:#a9b9d6; border:1px solid rgba(255,255,255,.12);
-  }
-  .summary{display:flex; justify-content:space-between; font-size:12px; color:var(--muted); margin-top:6px}
+  .summary{display:flex; justify-content:space-between; font-size:12px; color:#cfe1ff; margin-top:6px}
+  .sum-ok{color:#86efac} .sum-warn{color:#facc15}
 
   .share{margin-top:10px; display:grid; grid-template-columns:1fr auto; gap:8px; align-items:center}
   .share input{padding:10px 12px; border-radius:10px; border:1px solid rgba(255,255,255,.1); background:#0f1529; color:#eaf1ff;}
+
+  .toggle{display:flex; align-items:center; gap:8px; margin-top:8px; font-size:13px; color:#cfe1ff}
+  .toggle input{width:40px; height:20px}
 </style>
 </head>
 <body>
 <header>
   <h1>가중치 돌림판</h1>
-  <p>가중치는 자유롭게 바꾸되, 항목은 5개 고정(색상 지정)입니다.</p>
+  <p>항목 이름과 확률을 수정할 수 있습니다. (확률 합이 100%가 아니면 라벨은 자동 정규화 비율로 표시돼요)</p>
 </header>
 
 <main class="wrap">
@@ -82,7 +81,7 @@
     </div>
     <div class="controls">
       <button id="spinBtn" class="btn btn-accent">🎯 돌리기</button>
-      <button id="resetBtn" class="btn btn-danger">♻ 가중치 초기화</button>
+      <button id="resetBtn" class="btn btn-danger">♻ 기본값으로 초기화</button>
     </div>
     <div class="result" id="resultBox">결과가 여기에 표시됩니다</div>
     <div class="hint">추첨은 <code>crypto.getRandomValues()</code> 기반으로 수행됩니다.</div>
@@ -91,14 +90,18 @@
 
   <!-- SETTINGS -->
   <section class="card">
-    <h2>항목 & 가중치 (항목명/색상 고정)</h2>
+    <h2>항목 & 확률(%)</h2>
 
     <div class="summary">
       <span id="countBadge">항목 5개</span>
-      <span>가중치 합: <strong id="sumWeight">0</strong></span>
+      <span>합계: <strong id="sumWeight">0%</strong></span>
     </div>
 
     <div class="rows" id="rows"></div>
+
+    <div class="toggle">
+      <label for="showPct"><input type="checkbox" id="showPct"> 라벨에 확률(%) 표시</label>
+    </div>
 
     <div class="share">
       <input id="shareLink" readonly placeholder="공유 링크가 여기에 생성됩니다" />
@@ -109,61 +112,58 @@
 
 <script>
 /* ===== Config ===== */
-const LABEL_OFFSET_RATIO = 0.48; // ← 글씨 위치 (반지름 * 0.48)
+const LABEL_OFFSET_RATIO = 0.48; // 라벨 위치 (반지름 * 0.48)
 
 /* ===== Utilities ===== */
 const $ = (sel)=>document.querySelector(sel);
 
-function cryptoRandom(){ // [0,1)
-  const u32 = new Uint32Array(1);
-  crypto.getRandomValues(u32);
-  return u32[0] / 2**32;
-}
-function encodeConfig(cfg){
-  const json = JSON.stringify(cfg);
-  return btoa(unescape(encodeURIComponent(json)));
-}
-function decodeConfig(safe){
-  try{
-    const json = decodeURIComponent(escape(atob(safe)));
-    return JSON.parse(json);
-  }catch(e){ return null; }
-}
+function cryptoRandom(){ const u32 = new Uint32Array(1); crypto.getRandomValues(u32); return u32[0] / 2**32; }
+function encodeConfig(cfg){ const json = JSON.stringify(cfg); return btoa(unescape(encodeURIComponent(json))); }
+function decodeConfig(safe){ try{ const json = decodeURIComponent(escape(atob(safe))); return JSON.parse(json);}catch(e){ return null; }}
 
-/* ===== State (이름/색상 고정) ===== */
-const FIXED_ITEMS = [
-  { name:"그대로", color:"#B3D966", weight:1 },
-  { name:"2배",   color:"#F7CB3F", weight:1 },
-  { name:"0.5배", color:"#F0A84A", weight:1 },
-  { name:"꽝",    color:"#F59B95", weight:1 },
-  { name:"4배",   color:"#9DC0E5", weight:1 },
+/* ===== Defaults (요청한 순서/색/초기 확률) =====
+   꽝 - 10 / 0.5배 - 25 / 그대로 - 30 / 2배 - 30 / 4배 - 5
+*/
+const DEFAULT_ITEMS = [
+  { name:"꽝",   color:"#F59B95", weight:10 },
+  { name:"0.5배", color:"#F0A84A", weight:25 },
+  { name:"그대로", color:"#B3D966", weight:30 },
+  { name:"2배",   color:"#F7CB3F", weight:30 },
+  { name:"4배",   color:"#9DC0E5", weight:5  },
 ];
 
-let state = { items: [], spinDeg: 0, recent: [] };
-const LS_KEY = "weighted_roulette_fixed5_v3";
+let state = { items: [], spinDeg: 0, recent: [], showPct: true };
+const LS_KEY = "weighted_roulette_editable_v1";
 
-function sumWeights(){
-  return state.items.reduce((s,it)=>s+Number(it.weight||0),0);
-}
+function sumWeights(){ return state.items.reduce((s,it)=>s+(+it.weight||0),0); }
 
+/* ===== Persistence ===== */
 function saveState(pushURL=true){
   localStorage.setItem(LS_KEY, JSON.stringify(state));
+  // 공유 링크에 이름+확률 포함 (개인 설정인 showPct는 제외)
   const share = location.origin + location.pathname + "#cfg=" + encodeConfig({
-    weights: state.items.map(it=>Number(it.weight)||0)
+    items: state.items.map(({name,weight})=>({name,weight}))
   });
   $("#shareLink").value = share;
   if(pushURL) history.replaceState(null, "", share);
 }
 
 function loadState(){
-  let loadedWeights = null;
+  let loadedItems = null;
 
   // URL 해시 우선
   const hash = location.hash || "";
   if(hash.startsWith("#cfg=")){
     const cfg = decodeConfig(hash.slice(5));
-    if(cfg && Array.isArray(cfg.weights) && cfg.weights.length===5){
-      loadedWeights = cfg.weights.map(w => Math.max(0, Number(w) || 0));
+    if(cfg && Array.isArray(cfg.items) && cfg.items.length===5){
+      loadedItems = cfg.items.map((it,i)=>({
+        name: String(it.name ?? DEFAULT_ITEMS[i].name).slice(0,100),
+        weight: Math.max(0, Number(it.weight)||0),
+        color: DEFAULT_ITEMS[i].color, // 색상은 슬롯 고정
+      }));
+    } else if (cfg && Array.isArray(cfg.weights) && cfg.weights.length===5){
+      // 하위 호환: 예전 포맷(가중치만)
+      loadedItems = DEFAULT_ITEMS.map((d,i)=>({ name:d.name, weight:Math.max(0,Number(cfg.weights[i])||0), color:d.color }));
     }
   }
 
@@ -173,21 +173,27 @@ function loadState(){
     try{
       const s = JSON.parse(saved);
       state.recent = Array.isArray(s.recent) ? s.recent : [];
-      const weights = (s.items||[]).map(it=>Number(it.weight)||0);
-      if(weights.length===5 && !loadedWeights) loadedWeights = weights;
+      state.showPct = typeof s.showPct === "boolean" ? s.showPct : true;
+      if(!loadedItems && Array.isArray(s.items) && s.items.length===5){
+        loadedItems = s.items.map((it,i)=>({
+          name: String(it.name ?? DEFAULT_ITEMS[i].name).slice(0,100),
+          weight: Math.max(0, Number(it.weight)||0),
+          color: DEFAULT_ITEMS[i].color
+        }));
+      }
     }catch(e){}
   }
 
   // 상태 구성
-  state.items = FIXED_ITEMS.map((it, i)=>({
-    id: String(i),
-    name: it.name,
-    color: it.color,
-    weight: loadedWeights ? loadedWeights[i] : it.weight
+  state.items = (loadedItems ?? DEFAULT_ITEMS).map((it,i)=>({
+    id: String(i), name: it.name, color: it.color, weight: it.weight
   }));
+
+  // UI 스위치
+  $("#showPct").checked = state.showPct;
 }
 
-/* ===== UI: Rows ===== */
+/* ===== UI: Rows (이름 + 확률 입력 가능) ===== */
 function renderRows(){
   const rows = $("#rows");
   rows.innerHTML = "";
@@ -195,11 +201,16 @@ function renderRows(){
     const row = document.createElement("div");
     row.className = "row";
     row.innerHTML = `
-      <input class="name-readonly" value="${it.name}" aria-label="항목 이름" readonly>
-      <input type="number" min="0" step="0.01" value="${it.weight}" aria-label="가중치">
+      <input value="${it.name}" aria-label="항목 이름">
+      <input type="number" min="0" step="0.1" value="${it.weight}" aria-label="확률(%)">
     `;
-    const weightEl = row.children[1];
+    const [nameEl, weightEl] = row.children;
 
+    nameEl.addEventListener("input", ()=>{
+      it.name = nameEl.value.slice(0,100);
+      drawWheel();
+      saveState();
+    });
     weightEl.addEventListener("input", ()=>{
       it.weight = Math.max(0, Number(weightEl.value)||0);
       drawWheel();
@@ -212,9 +223,13 @@ function renderRows(){
 
   updateSummary();
 }
+
 function updateSummary(){
+  const total = sumWeights();
+  const sumEl = $("#sumWeight");
+  sumEl.textContent = `${total.toFixed(1)}%`;
+  sumEl.className = (Math.abs(total-100)<0.05) ? "sum-ok" : "sum-warn";
   $("#countBadge").textContent = `항목 ${state.items.length}개`;
-  $("#sumWeight").textContent = sumWeights().toFixed(2);
 }
 
 /* ===== Wheel Drawing ===== */
@@ -233,52 +248,35 @@ function drawWheel(){
   const total = sumWeights();
   slices = [];
   if(total <= 0){
-    // 빈 상태
-    ctx.beginPath();
-    ctx.arc(cx,cy,r,0,Math.PI*2);
-    ctx.fillStyle = "#1f2a48";
-    ctx.fill();
-    ctx.fillStyle = "#cbd5e1";
-    ctx.font = "20px system-ui";
-    ctx.textAlign="center"; ctx.textBaseline="middle";
-    ctx.fillText("가중치를 입력하세요", cx, cy);
+    ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.fillStyle = "#1f2a48"; ctx.fill();
+    ctx.fillStyle = "#cbd5e1"; ctx.font = "20px system-ui";
+    ctx.textAlign="center"; ctx.textBaseline="middle"; ctx.fillText("확률(%)을 입력하세요", cx, cy);
     return;
   }
 
-  let start = -Math.PI/2; // 포인터가 위쪽
+  let start = -Math.PI/2;
   state.items.forEach((it)=>{
-    const ratio = (Number(it.weight)||0)/total;
+    const ratio = (Number(it.weight)||0)/total;     // 정규화된 비율
     const angle = ratio * Math.PI*2;
     const end = start + angle;
 
-    // 조각
-    ctx.beginPath();
-    ctx.moveTo(cx,cy);
-    ctx.arc(cx,cy,r,start,end,false);
-    ctx.closePath();
-    ctx.fillStyle = it.color;
-    ctx.fill();
+    // Slice
+    ctx.beginPath(); ctx.moveTo(cx,cy); ctx.arc(cx,cy,r,start,end,false); ctx.closePath();
+    ctx.fillStyle = it.color; ctx.fill();
 
-    // 텍스트 (항상 밖을 향하게) — 위치를 r * LABEL_OFFSET_RATIO 로 고정
+    // Label (outside, auto-flip)
     const mid = (start+end)/2;
-    ctx.save();
-    ctx.translate(cx,cy);
-    ctx.rotate(mid);
+    ctx.save(); ctx.translate(cx,cy); ctx.rotate(mid);
 
-    const label = `${it.name} (${(ratio*100).toFixed(1)}%)`;
-    ctx.font = "bold 18px system-ui";
-    ctx.fillStyle = "#0b1020";
-    ctx.textBaseline = "middle";
+    const label = state.showPct ? `${it.name} (${(ratio*100).toFixed(1)}%)` : `${it.name}`;
+    ctx.font = "bold 18px system-ui"; ctx.fillStyle = "#0b1020"; ctx.textBaseline = "middle";
 
     const offset = r * LABEL_OFFSET_RATIO;
     let angleDeg = mid * 180 / Math.PI;
     if (angleDeg > 90 && angleDeg < 270) {
-      ctx.rotate(Math.PI);
-      ctx.textAlign = "right";
-      ctx.fillText(label, -offset, 0);
+      ctx.rotate(Math.PI); ctx.textAlign = "right"; ctx.fillText(label, -offset, 0);
     } else {
-      ctx.textAlign = "left";
-      ctx.fillText(label, offset, 0);
+      ctx.textAlign = "left"; ctx.fillText(label, offset, 0);
     }
     ctx.restore();
 
@@ -286,40 +284,29 @@ function drawWheel(){
     start = end;
   });
 
-  // 중앙 허브
-  ctx.beginPath();
-  ctx.arc(cx,cy,48,0,Math.PI*2);
-  ctx.fillStyle = "#0f1529"; ctx.fill();
+  // Center hub
+  ctx.beginPath(); ctx.arc(cx,cy,48,0,Math.PI*2); ctx.fillStyle = "#0f1529"; ctx.fill();
   ctx.lineWidth = 2; ctx.strokeStyle = "rgba(255,255,255,.15)"; ctx.stroke();
 }
 
+/* ===== Spin Logic ===== */
 function pickWeighted(){
-  const total = sumWeights();
-  if(total<=0) return null;
-  let target = cryptoRandom() * total;
-  for(const s of state.items){
-    target -= Number(s.weight)||0;
-    if(target <= 1e-12) return s;
-  }
+  const total = sumWeights(); if(total<=0) return null;
+  let t = cryptoRandom() * total;
+  for(const s of state.items){ t -= Number(s.weight)||0; if(t <= 1e-12) return s; }
   return state.items[state.items.length-1];
 }
 
 function spin(){
   if(sumWeights()<=0) return;
-
   const targetItem = pickWeighted();
-  const sl = slices.find(s=>s.name===targetItem.name);
-  if(!sl){ return; }
+  const sl = slices.find(s=>s.name===targetItem.name); if(!sl) return;
 
-  // 포인터(위, -PI/2)가 목표 조각 중앙을 가리키도록
-  const midRad = sl.mid;
-  const deltaRad = midRad - (-Math.PI/2);
+  const deltaRad = sl.mid - (-Math.PI/2);
   let deltaDeg = deltaRad * 180/Math.PI;
-
-  const fullTurns = 6 + Math.floor(cryptoRandom()*3); // 6~8 바퀴
+  const fullTurns = 6 + Math.floor(cryptoRandom()*3);
   const sliceDeg = (sl.end - sl.start) * 180/Math.PI;
   const jitter = (cryptoRandom()*0.6 - 0.3) * sliceDeg;
-
   const targetDeg = (fullTurns*360) + deltaDeg + jitter;
 
   state.spinDeg += targetDeg;
@@ -327,33 +314,35 @@ function spin(){
   rotor.style.transform = `rotate(${state.spinDeg}deg)`;
 
   rotor.ontransitionend = ()=>{
-    $("#resultBox").innerHTML = `결과: <strong>${targetItem.name}</strong>`;
-    state.recent.unshift(targetItem.name);
-    state.recent = state.recent.slice(0,6);
-    renderRecent();
-    saveState(false);
+    document.getElementById("resultBox").innerHTML = `결과: <strong>${targetItem.name}</strong>`;
+    state.recent = [targetItem.name, ...state.recent].slice(0,6);
+    renderRecent(); saveState(false);
     rotor.ontransitionend = null;
   };
 }
 
 function renderRecent(){
-  const box = $("#recentBox");
+  const box = document.getElementById("recentBox");
   if(!state.recent.length){ box.textContent = ""; return; }
   box.innerHTML = `최근 결과: ${state.recent.map(x=>`<span style="background:#1d2a52;border:1px solid rgba(255,255,255,.08);padding:3px 8px;border-radius:999px;">${x}</span>`).join(" ")}`;
 }
 
 /* ===== Events ===== */
-$("#spinBtn").addEventListener("click", spin);
-$("#resetBtn").addEventListener("click", ()=>{
-  if(confirm("가중치를 모두 1로 초기화할까요?")){
-    state.items = FIXED_ITEMS.map((it,i)=>({ id:String(i), name:it.name, color:it.color, weight:1 }));
-    drawWheel(); renderRows(); renderRecent(); saveState();
-    rotor.style.transition="none"; rotor.style.transform="rotate(0deg)";
+document.getElementById("showPct").addEventListener("change", (e)=>{
+  state.showPct = e.target.checked; drawWheel(); saveState();
+});
+document.getElementById("spinBtn").addEventListener("click", spin);
+document.getElementById("resetBtn").addEventListener("click", ()=>{
+  if(confirm("항목과 확률을 기본값으로 되돌릴까요?")){
+    state.items = DEFAULT_ITEMS.map((it,i)=>({ id:String(i), name:it.name, color:it.color, weight:it.weight }));
+    state.recent = []; state.spinDeg = 0;
+    drawWheel(); renderRows(); renderRecent(); updateSummary(); saveState();
+    document.getElementById("wheel-rotor").style.transition="none";
+    document.getElementById("wheel-rotor").style.transform="rotate(0deg)";
   }
 });
 document.getElementById("copyBtn").addEventListener("click", async ()=>{
-  const link = document.getElementById("shareLink").value;
-  if(!link) return;
+  const link = document.getElementById("shareLink").value; if(!link) return;
   try{ await navigator.clipboard.writeText(link); alert("공유 링크 복사됨!"); }
   catch{ prompt("복사할 수 없어요. 아래 링크를 수동으로 복사하세요:", link); }
 });
