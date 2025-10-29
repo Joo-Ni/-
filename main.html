@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>가중치 돌림판 (Weighted Roulette)</title>
+<style>
+  :root{
+    --bg:#0b1020; --panel:#141a2e; --accent:#6ea8fe; --muted:#9fb3c8; --ok:#4ade80; --danger:#f87171;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Apple SD Gothic Neo,Noto Sans KR,sans-serif;
+    background:linear-gradient(180deg,#0a0f1e 0%,#0b1020 60%,#0a0f1e 100%); color:#e8f0ff;
+  }
+  header{padding:18px 16px 6px; text-align:center}
+  header h1{margin:0; font-size:20px; letter-spacing:.2px}
+  header p{margin:6px 0 0; color:var(--muted); font-size:13px}
+
+  .wrap{display:grid; grid-template-columns:1fr; gap:12px; padding:12px; max-width:1000px; margin:0 auto}
+  @media (min-width:960px){ .wrap{grid-template-columns:1.2fr .8fr; padding:16px; gap:16px} }
+
+  .card{
+    background:rgba(20,26,46,.7); border:1px solid rgba(255,255,255,.06);
+    border-radius:16px; padding:14px; backdrop-filter: blur(6px);
+    box-shadow: 0 6px 20px rgba(0,0,0,.35);
+  }
+  .card h2{margin:0 0 10px; font-size:16px; color:#e9efff}
+
+  .board{display:grid; place-items:center; padding:8px 8px 16px;}
+  .wheel-shell{ position:relative; width:min(90vw,520px); aspect-ratio:1; }
+  .wheel-rotor{ width:100%; height:100%; transition: transform 4.2s cubic-bezier(.14,.75,.25,1); will-change:transform; }
+  canvas{ width:100%; height:100%; display:block; border-radius:50%; }
+
+  .pointer{
+    position:absolute; left:50%; top:-8px; transform:translateX(-50%);
+    width:0; height:0; border-left:12px solid transparent; border-right:12px solid transparent;
+    border-bottom:18px solid #ffd166; filter: drop-shadow(0 2px 2px rgba(0,0,0,.5));
+  }
+
+  .controls{display:flex; gap:8px; flex-wrap:wrap; justify-content:center; margin-top:10px}
+  button, .btn{
+    background:linear-gradient(180deg,#233055,#1a2341); color:#e8f0ff; border:1px solid rgba(255,255,255,.1);
+    padding:10px 14px; border-radius:12px; font-weight:600; cursor:pointer;
+  }
+  button:hover{filter:brightness(1.06)}
+  .btn-accent{background:linear-gradient(180deg,#3b5bcc,#294ab3)}
+  .btn-ghost{background:transparent}
+  .btn-danger{background:linear-gradient(180deg,#7a2330,#671c27)}
+
+  .result{text-align:center; margin-top:10px; font-size:15px; color:#d9e6ff;}
+  .result strong{font-size:18px; color:#fff}
+  .hint{font-size:12px; color:var(--muted); text-align:center; margin-top:6px}
+  .recent{margin-top:8px; font-size:13px; color:#cfe1ff}
+
+  .rows{margin-top:8px; border-top:1px dashed rgba(255,255,255,.08); padding-top:8px; max-height:50vh; overflow:auto}
+  .row{
+    display:grid; grid-template-columns:1fr 90px; gap:8px; align-items:center; margin:6px 0;
+  }
+  .row input{padding:9px 10px}
+  .name-readonly{
+    background:#0f1529; color:#a9b9d6; border:1px solid rgba(255,255,255,.12);
+  }
+  .summary{display:flex; justify-content:space-between; font-size:12px; color:var(--muted); margin-top:6px}
+
+  .share{margin-top:10px; display:grid; grid-template-columns:1fr auto; gap:8px; align-items:center}
+  .share input{padding:10px 12px; border-radius:10px; border:1px solid rgba(255,255,255,.1); background:#0f1529; color:#eaf1ff;}
+  .small{font-size:12px; color:var(--muted)}
+
+  .badge{display:inline-block; padding:3px 8px; border-radius:999px; font-size:12px; background:#1d2a52; color:#cfe1ff; border:1px solid rgba(255,255,255,.08)}
+</style>
+</head>
+<body>
+<header>
+  <h1>가중치 돌림판</h1>
+  <p>가중치는 자유롭게 바꾸되, 항목은 5개 고정(색상 지정)입니다.</p>
+</header>
+
+<main class="wrap">
+  <!-- WHEEL -->
+  <section class="card board">
+    <h2>돌림판</h2>
+    <div class="wheel-shell">
+      <div class="pointer" aria-hidden="true"></div>
+      <div id="wheel-rotor" class="wheel-rotor" aria-live="polite" aria-label="roulette wheel">
+        <canvas id="wheel" width="700" height="700"></canvas>
+      </div>
+    </div>
+    <div class="controls">
+      <button id="spinBtn" class="btn btn-accent">🎯 돌리기</button>
+      <button id="shuffleColorsBtn" class="btn" title="색상은 고정되어 있으므로 비활성" disabled>🌈 색상 섞기</button>
+      <button id="resetBtn" class="btn btn-danger">♻ 가중치 초기화</button>
+    </div>
+    <div class="result" id="resultBox">결과가 여기에 표시됩니다</div>
+    <div class="hint">추첨은 <code>crypto.getRandomValues()</code> 기반으로 수행됩니다.</div>
+    <div class="recent" id="recentBox" aria-live="polite"></div>
+  </section>
+
+  <!-- SETTINGS -->
+  <section class="card">
+    <h2>항목 & 가중치 (항목명/색상 고정)</h2>
+
+    <div class="summary">
+      <span class="badge" id="countBadge">항목 5개</span>
+      <span>가중치 합: <strong id="sumWeight">0</strong></span>
+    </div>
+
+    <div class="rows" id="rows"></div>
+
+    <div class="share">
+      <input id="shareLink" readonly placeholder="공유 링크가 여기에 생성됩니다" />
+      <button id="copyBtn" class="btn">링크 복사</button>
+    </div>
+    <div class="small">설정은 자동 저장(LocalStorage) + 공유 링크에 포함됩니다.</div>
+  </section>
+</main>
+
+<script>
+/* ===== Utilities ===== */
+const $ = (sel)=>document.querySelector(sel);
+
+function cryptoRandom(){ // [0,1)
+  const u32 = new Uint32Array(1);
+  crypto.getRandomValues(u32);
+  return u32[0] / 2**32;
+}
+function encodeConfig(cfg){
+  const json = JSON.stringify(cfg);
+  return btoa(unescape(encodeURIComponent(json)));
+}
+function decodeConfig(safe){
+  try{
+    const json = decodeURIComponent(escape(atob(safe)));
+    return JSON.parse(json);
+  }catch(e){ return null; }
+}
+
+/* ===== State ===== */
+const FIXED_ITEMS = [
+  // 이름 / 기본 가중치 / 고정 색상
+  { name:"그대로", weight:1, color:"#B3D966" },
+  { name:"2배",   weight:1, color:"#F7CB3F" },
+  { name:"0.5배", weight:1, color:"#F0A84A" },
+  { name:"꽝",    weight:1, color:"#F59B95" },
+  { name:"4배",   weight:1, color:"#9DC0E5" },
+];
+
+let state = {
+  items: [],
+  spinDeg: 0,
+  recent: []
+};
+const LS_KEY = "weighted_roulette_fixed5_v1";
+
+function sumWeights(){
+  return state.items.reduce((s,it)=>s+Number(it.weight||0),0);
+}
+
+function saveState(pushURL=true){
+  localStorage.setItem(LS_KEY, JSON.stringify(state));
+  // 공유 링크 (이름/색상은 고정이라 가중치만 포함)
+  const share = location.origin + location.pathname + "#cfg=" + encodeConfig({
+    weights: state.items.map(it=>Number(it.weight)||0)
+  });
+  $("#shareLink").value = share;
+  if(pushURL){
+    history.replaceState(null, "", share);
+  }
+}
+
+function loadState(){
+  // 해시에서 로드 (가중치만)
+  const hash = location.hash || "";
+  let loadedWeights = null;
+  if(hash.startsWith("#cfg=")){
+    const cfg = decodeConfig(hash.slice(5));
+    if(cfg && Array.isArray(cfg.weights) && cfg.weights.length===5){
+      loadedWeights = cfg.weights.map(w => Math.max(0, Number(w) || 0));
+    }
+  }
+  // 로컬 저장 불러오기
+  const saved = localStorage.getItem(LS_KEY);
+  if(saved){
+    try{
+      const s = JSON.parse(saved);
+      state.recent = Array.isArray(s.recent) ? s.recent : [];
+      const weights = (s.items||[]).map(it=>Number(it.weight)||0);
+      if(weights.length===5){
+        loadedWeights = loadedWeights || weights;
+      }
+    }catch(e){}
+  }
+  // 상태 구성 (이름/색상은 고정)
+  state.items = FIXED_ITEMS.map((it, i)=>({
+    id: i.toString(),
+    name: it.name,
+    color: it.color,
+    weight: loadedWeights ? loadedWeights[i] : it.weight
+  }));
+}
+
+/* ===== UI: Rows ===== */
+function renderRows(){
+  const rows = $("#rows");
+  rows.innerHTML = "";
+  state.items.forEach((it, idx)=>{
+    const row = document.createElement("div");
+    row.className = "row";
+    row.innerHTML = `
+      <input class="name-readonly" value="${it.name}" aria-label="항목 이름" readonly>
+      <input type="number" min="0" step="0.01" value="${it.weight}" aria-label="가중치">
+    `;
+    const [nameEl, weightEl] = row.children;
+
+    weightEl.addEventListener("input", ()=>{
+      it.weight = Math.max(0, Number(weightEl.value)||0);
+      drawWheel();
+      updateSummary();
+      saveState();
+    });
+
+    rows.appendChild(row);
+  });
+
+  updateSummary();
+}
+function updateSummary(){
+  $("#countBadge").textContent = `항목 ${state.items.length}개`;
+  $("#sumWeight").textContent = sumWeights().toFixed(2);
+}
+
+/* ===== Wheel Drawing ===== */
+const wheel = document.getElementById("wheel");
+const ctx = wheel.getContext("2d");
+const rotor = document.getElementById("wheel-rotor");
+let slices = []; // {start,end,mid,name,color,weight}
+
+function drawWheel(){
+  const w = wheel.width, h = wheel.height;
+  const cx = w/2, cy = h/2;
+  const r = Math.min(w,h)/2 - 6;
+
+  ctx.clearRect(0,0,w,h);
+
+  const total = sumWeights();
+  slices = [];
+  if(total <= 0){
+    // draw empty
+    ctx.beginPath();
+    ctx.arc(cx,cy,r,0,Math.PI*2);
+    ctx.fillStyle = "#1f2a48";
+    ctx.fill();
+    ctx.fillStyle = "#cbd5e1";
+    ctx.font = "20px system-ui";
+    ctx.textAlign="center"; ctx.textBaseline="middle";
+    ctx.fillText("가중치를 입력하세요", cx, cy);
+    return;
+  }
+
+  let start = -Math.PI/2; // pointer at top
+  state.items.forEach((it)=>{
+    const ratio = (Number(it.weight)||0)/total;
+    const angle = ratio * Math.PI*2;
+    const end = start + angle;
+
+    // slice
+    ctx.beginPath();
+    ctx.moveTo(cx,cy);
+    ctx.arc(cx,cy,r,start,end,false);
+    ctx.closePath();
+    ctx.fillStyle = it.color;
+    ctx.fill();
+
+    // text
+    const mid = (start+end)/2;
+    ctx.save();
+    ctx.translate(cx,cy);
+    ctx.rotate(mid);
+    ctx.textAlign="left"; ctx.textBaseline="middle";
+    ctx.fillStyle = "#0b1020";
+    ctx.font = "bold 18px system-ui";
+    const label = `${it.name} (${(ratio*100).toFixed(1)}%)`;
+    ctx.fillText(label, 16, 0);
+    ctx.restore();
+
+    slices.push({start, end, mid, name:it.name, color:it.color, weight:it.weight});
+    start = end;
+  });
+
+  // center hub
+  ctx.beginPath();
+  ctx.arc(cx,cy,48,0,Math.PI*2);
+  ctx.fillStyle = "#0f1529"; ctx.fill();
+  ctx.lineWidth = 2; ctx.strokeStyle = "rgba(255,255,255,.15)"; ctx.stroke();
+}
+
+function pickWeighted(){
+  const total = sumWeights();
+  if(total<=0) return null;
+  let target = cryptoRandom() * total;
+  for(const s of state.items){
+    target -= Number(s.weight)||0;
+    if(target <= 1e-12) return s;
+  }
+  return state.items[state.items.length-1];
+}
+
+function spin(){
+  if(sumWeights()<=0) return;
+
+  const targetItem = pickWeighted();
+  const sl = slices.find(s=>s.name===targetItem.name);
+  if(!sl){ return; }
+
+  // pointer(top, -PI/2) to mid of target
+  const midRad = sl.mid;
+  const deltaRad = midRad - (-Math.PI/2);
+  let deltaDeg = deltaRad * 180/Math.PI;
+
+  const fullTurns = 6 + Math.floor(cryptoRandom()*3); // 6~8 turns
+  const sliceDeg = (sl.end - sl.start) * 180/Math.PI;
+  const jitter = (cryptoRandom()*0.6 - 0.3) * sliceDeg;
+
+  const targetDeg = (fullTurns*360) + deltaDeg + jitter;
+
+  state.spinDeg += targetDeg;
+  rotor.style.transition = "transform 4.2s cubic-bezier(.14,.75,.25,1)";
+  rotor.style.transform = `rotate(${state.spinDeg}deg)`;
+
+  rotor.ontransitionend = ()=>{
+    document.getElementById("resultBox").innerHTML = `결과: <strong>${targetItem.name}</strong>`;
+    state.recent.unshift(targetItem.name);
+    state.recent = state.recent.slice(0,6);
+    renderRecent();
+    saveState(false);
+    rotor.ontransitionend = null;
+  };
+}
+
+function renderRecent(){
+  const box = document.getElementById("recentBox");
+  if(!state.recent.length){ box.textContent = ""; return; }
+  box.innerHTML = `최근 결과: ${state.recent.map(x=>`<span class="badge">${x}</span>`).join(" ")}`;
+}
+
+/* ===== Events ===== */
+document.getElementById("spinBtn").addEventListener("click", spin);
+document.getElementById("resetBtn").addEventListener("click", ()=>{
+  if(confirm("가중치를 모두 1로 초기화할까요?")){
+    state.items = FIXED_ITEMS.map((it,i)=>({ id:String(i), name:it.name, color:it.color, weight:1 }));
+    drawWheel(); renderRows(); renderRecent(); saveState();
+    rotor.style.transition="none"; rotor.style.transform="rotate(0deg)";
+  }
+});
+document.getElementById("copyBtn").addEventListener("click", async ()=>{
+  const link = document.getElementById("shareLink").value;
+  if(!link) return;
+  try{ await navigator.clipboard.writeText(link); alert("공유 링크 복사됨!"); }
+  catch{ prompt("복사할 수 없어요. 아래 링크를 수동으로 복사하세요:", link); }
+});
+
+/* ===== Init ===== */
+loadState();
+drawWheel();
+renderRows();
+renderRecent();
+saveState();
+</script>
+</body>
+</html>
