@@ -108,6 +108,9 @@
 </main>
 
 <script>
+/* ===== Config ===== */
+const LABEL_OFFSET_RATIO = 0.48; // ← 글씨 위치 (반지름 * 0.48)
+
 /* ===== Utilities ===== */
 const $ = (sel)=>document.querySelector(sel);
 
@@ -137,7 +140,7 @@ const FIXED_ITEMS = [
 ];
 
 let state = { items: [], spinDeg: 0, recent: [] };
-const LS_KEY = "weighted_roulette_fixed5_v2";
+const LS_KEY = "weighted_roulette_fixed5_v3";
 
 function sumWeights(){
   return state.items.reduce((s,it)=>s+Number(it.weight||0),0);
@@ -256,7 +259,7 @@ function drawWheel(){
     ctx.fillStyle = it.color;
     ctx.fill();
 
-    // 텍스트 (항상 밖을 향하게)
+    // 텍스트 (항상 밖을 향하게) — 위치를 r * LABEL_OFFSET_RATIO 로 고정
     const mid = (start+end)/2;
     ctx.save();
     ctx.translate(cx,cy);
@@ -267,15 +270,15 @@ function drawWheel(){
     ctx.fillStyle = "#0b1020";
     ctx.textBaseline = "middle";
 
+    const offset = r * LABEL_OFFSET_RATIO;
     let angleDeg = mid * 180 / Math.PI;
     if (angleDeg > 90 && angleDeg < 270) {
-      // 뒤집히는 영역이면 반전
       ctx.rotate(Math.PI);
       ctx.textAlign = "right";
-      ctx.fillText(label, -16, 0); // 좌우 반전이므로 -16
+      ctx.fillText(label, -offset, 0);
     } else {
       ctx.textAlign = "left";
-      ctx.fillText(label, 16, 0);
+      ctx.fillText(label, offset, 0);
     }
     ctx.restore();
 
