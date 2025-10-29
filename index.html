@@ -6,7 +6,7 @@
 <title>가중치 돌림판 (Weighted Roulette)</title>
 <style>
   :root{
-    --bg:#0b1020; --panel:#141a2e; --accent:#6ea8fe; --muted:#9fb3c8; --ok:#4ade80; --danger:#f87171;
+    --bg:#0b1020; --panel:#141a2e; --accent:#6ea8fe; --muted:#9fb3c8;
   }
   *{box-sizing:border-box}
   body{
@@ -45,7 +45,6 @@
   }
   button:hover{filter:brightness(1.06)}
   .btn-accent{background:linear-gradient(180deg,#3b5bcc,#294ab3)}
-  .btn-ghost{background:transparent}
   .btn-danger{background:linear-gradient(180deg,#7a2330,#671c27)}
 
   .result{text-align:center; margin-top:10px; font-size:15px; color:#d9e6ff;}
@@ -54,9 +53,7 @@
   .recent{margin-top:8px; font-size:13px; color:#cfe1ff}
 
   .rows{margin-top:8px; border-top:1px dashed rgba(255,255,255,.08); padding-top:8px; max-height:50vh; overflow:auto}
-  .row{
-    display:grid; grid-template-columns:1fr 90px; gap:8px; align-items:center; margin:6px 0;
-  }
+  .row{display:grid; grid-template-columns:1fr 110px; gap:8px; align-items:center; margin:6px 0;}
   .row input{padding:9px 10px}
   .name-readonly{
     background:#0f1529; color:#a9b9d6; border:1px solid rgba(255,255,255,.12);
@@ -65,9 +62,6 @@
 
   .share{margin-top:10px; display:grid; grid-template-columns:1fr auto; gap:8px; align-items:center}
   .share input{padding:10px 12px; border-radius:10px; border:1px solid rgba(255,255,255,.1); background:#0f1529; color:#eaf1ff;}
-  .small{font-size:12px; color:var(--muted)}
-
-  .badge{display:inline-block; padding:3px 8px; border-radius:999px; font-size:12px; background:#1d2a52; color:#cfe1ff; border:1px solid rgba(255,255,255,.08)}
 </style>
 </head>
 <body>
@@ -88,7 +82,6 @@
     </div>
     <div class="controls">
       <button id="spinBtn" class="btn btn-accent">🎯 돌리기</button>
-      <button id="shuffleColorsBtn" class="btn" title="색상은 고정되어 있으므로 비활성" disabled>🌈 색상 섞기</button>
       <button id="resetBtn" class="btn btn-danger">♻ 가중치 초기화</button>
     </div>
     <div class="result" id="resultBox">결과가 여기에 표시됩니다</div>
@@ -101,7 +94,7 @@
     <h2>항목 & 가중치 (항목명/색상 고정)</h2>
 
     <div class="summary">
-      <span class="badge" id="countBadge">항목 5개</span>
+      <span id="countBadge">항목 5개</span>
       <span>가중치 합: <strong id="sumWeight">0</strong></span>
     </div>
 
@@ -111,7 +104,6 @@
       <input id="shareLink" readonly placeholder="공유 링크가 여기에 생성됩니다" />
       <button id="copyBtn" class="btn">링크 복사</button>
     </div>
-    <div class="small">설정은 자동 저장(LocalStorage) + 공유 링크에 포함됩니다.</div>
   </section>
 </main>
 
@@ -135,22 +127,17 @@ function decodeConfig(safe){
   }catch(e){ return null; }
 }
 
-/* ===== State ===== */
+/* ===== State (이름/색상 고정) ===== */
 const FIXED_ITEMS = [
-  // 이름 / 기본 가중치 / 고정 색상
-  { name:"그대로", weight:1, color:"#B3D966" },
-  { name:"2배",   weight:1, color:"#F7CB3F" },
-  { name:"0.5배", weight:1, color:"#F0A84A" },
-  { name:"꽝",    weight:1, color:"#F59B95" },
-  { name:"4배",   weight:1, color:"#9DC0E5" },
+  { name:"그대로", color:"#B3D966", weight:1 },
+  { name:"2배",   color:"#F7CB3F", weight:1 },
+  { name:"0.5배", color:"#F0A84A", weight:1 },
+  { name:"꽝",    color:"#F59B95", weight:1 },
+  { name:"4배",   color:"#9DC0E5", weight:1 },
 ];
 
-let state = {
-  items: [],
-  spinDeg: 0,
-  recent: []
-};
-const LS_KEY = "weighted_roulette_fixed5_v1";
+let state = { items: [], spinDeg: 0, recent: [] };
+const LS_KEY = "weighted_roulette_fixed5_v2";
 
 function sumWeights(){
   return state.items.reduce((s,it)=>s+Number(it.weight||0),0);
@@ -158,41 +145,39 @@ function sumWeights(){
 
 function saveState(pushURL=true){
   localStorage.setItem(LS_KEY, JSON.stringify(state));
-  // 공유 링크 (이름/색상은 고정이라 가중치만 포함)
   const share = location.origin + location.pathname + "#cfg=" + encodeConfig({
     weights: state.items.map(it=>Number(it.weight)||0)
   });
   $("#shareLink").value = share;
-  if(pushURL){
-    history.replaceState(null, "", share);
-  }
+  if(pushURL) history.replaceState(null, "", share);
 }
 
 function loadState(){
-  // 해시에서 로드 (가중치만)
-  const hash = location.hash || "";
   let loadedWeights = null;
+
+  // URL 해시 우선
+  const hash = location.hash || "";
   if(hash.startsWith("#cfg=")){
     const cfg = decodeConfig(hash.slice(5));
     if(cfg && Array.isArray(cfg.weights) && cfg.weights.length===5){
       loadedWeights = cfg.weights.map(w => Math.max(0, Number(w) || 0));
     }
   }
-  // 로컬 저장 불러오기
+
+  // LocalStorage
   const saved = localStorage.getItem(LS_KEY);
   if(saved){
     try{
       const s = JSON.parse(saved);
       state.recent = Array.isArray(s.recent) ? s.recent : [];
       const weights = (s.items||[]).map(it=>Number(it.weight)||0);
-      if(weights.length===5){
-        loadedWeights = loadedWeights || weights;
-      }
+      if(weights.length===5 && !loadedWeights) loadedWeights = weights;
     }catch(e){}
   }
-  // 상태 구성 (이름/색상은 고정)
+
+  // 상태 구성
   state.items = FIXED_ITEMS.map((it, i)=>({
-    id: i.toString(),
+    id: String(i),
     name: it.name,
     color: it.color,
     weight: loadedWeights ? loadedWeights[i] : it.weight
@@ -210,7 +195,7 @@ function renderRows(){
       <input class="name-readonly" value="${it.name}" aria-label="항목 이름" readonly>
       <input type="number" min="0" step="0.01" value="${it.weight}" aria-label="가중치">
     `;
-    const [nameEl, weightEl] = row.children;
+    const weightEl = row.children[1];
 
     weightEl.addEventListener("input", ()=>{
       it.weight = Math.max(0, Number(weightEl.value)||0);
@@ -245,7 +230,7 @@ function drawWheel(){
   const total = sumWeights();
   slices = [];
   if(total <= 0){
-    // draw empty
+    // 빈 상태
     ctx.beginPath();
     ctx.arc(cx,cy,r,0,Math.PI*2);
     ctx.fillStyle = "#1f2a48";
@@ -257,13 +242,13 @@ function drawWheel(){
     return;
   }
 
-  let start = -Math.PI/2; // pointer at top
+  let start = -Math.PI/2; // 포인터가 위쪽
   state.items.forEach((it)=>{
     const ratio = (Number(it.weight)||0)/total;
     const angle = ratio * Math.PI*2;
     const end = start + angle;
 
-    // slice
+    // 조각
     ctx.beginPath();
     ctx.moveTo(cx,cy);
     ctx.arc(cx,cy,r,start,end,false);
@@ -271,47 +256,34 @@ function drawWheel(){
     ctx.fillStyle = it.color;
     ctx.fill();
 
-    // text
+    // 텍스트 (항상 밖을 향하게)
     const mid = (start+end)/2;
-    // 기존 drawWheel 함수 안에서 "ctx.save(); ctx.translate(cx,cy);"부터 이 부분만 교체
     ctx.save();
-    ctx.translate(cx, cy);
+    ctx.translate(cx,cy);
     ctx.rotate(mid);
-    
-    // ✅ 글자가 뒤집히지 않게 조정
+
+    const label = `${it.name} (${(ratio*100).toFixed(1)}%)`;
+    ctx.font = "bold 18px system-ui";
+    ctx.fillStyle = "#0b1020";
+    ctx.textBaseline = "middle";
+
     let angleDeg = mid * 180 / Math.PI;
     if (angleDeg > 90 && angleDeg < 270) {
-      ctx.rotate(Math.PI); // 반대 방향으로 뒤집기
+      // 뒤집히는 영역이면 반전
+      ctx.rotate(Math.PI);
       ctx.textAlign = "right";
-      ctx.textBaseline = "middle";
-      ctx.fillStyle = "#0b1020";
-      ctx.font = "bold 18px system-ui";
-      const label = `${it.name} (${(ratio * 100).toFixed(1)}%)`;
-      ctx.fillText(label, -16, 0); // 좌우 반전 시 -16
+      ctx.fillText(label, -16, 0); // 좌우 반전이므로 -16
     } else {
       ctx.textAlign = "left";
-      ctx.textBaseline = "middle";
-      ctx.fillStyle = "#0b1020";
-      ctx.font = "bold 18px system-ui";
-      const label = `${it.name} (${(ratio * 100).toFixed(1)}%)`;
       ctx.fillText(label, 16, 0);
     }
-    
-    ctx.restore();
-
-    ctx.rotate(mid);
-    ctx.textAlign="left"; ctx.textBaseline="middle";
-    ctx.fillStyle = "#0b1020";
-    ctx.font = "bold 18px system-ui";
-    const label = `${it.name} (${(ratio*100).toFixed(1)}%)`;
-    ctx.fillText(label, 16, 0);
     ctx.restore();
 
     slices.push({start, end, mid, name:it.name, color:it.color, weight:it.weight});
     start = end;
   });
 
-  // center hub
+  // 중앙 허브
   ctx.beginPath();
   ctx.arc(cx,cy,48,0,Math.PI*2);
   ctx.fillStyle = "#0f1529"; ctx.fill();
@@ -336,12 +308,12 @@ function spin(){
   const sl = slices.find(s=>s.name===targetItem.name);
   if(!sl){ return; }
 
-  // pointer(top, -PI/2) to mid of target
+  // 포인터(위, -PI/2)가 목표 조각 중앙을 가리키도록
   const midRad = sl.mid;
   const deltaRad = midRad - (-Math.PI/2);
   let deltaDeg = deltaRad * 180/Math.PI;
 
-  const fullTurns = 6 + Math.floor(cryptoRandom()*3); // 6~8 turns
+  const fullTurns = 6 + Math.floor(cryptoRandom()*3); // 6~8 바퀴
   const sliceDeg = (sl.end - sl.start) * 180/Math.PI;
   const jitter = (cryptoRandom()*0.6 - 0.3) * sliceDeg;
 
@@ -352,7 +324,7 @@ function spin(){
   rotor.style.transform = `rotate(${state.spinDeg}deg)`;
 
   rotor.ontransitionend = ()=>{
-    document.getElementById("resultBox").innerHTML = `결과: <strong>${targetItem.name}</strong>`;
+    $("#resultBox").innerHTML = `결과: <strong>${targetItem.name}</strong>`;
     state.recent.unshift(targetItem.name);
     state.recent = state.recent.slice(0,6);
     renderRecent();
@@ -362,14 +334,14 @@ function spin(){
 }
 
 function renderRecent(){
-  const box = document.getElementById("recentBox");
+  const box = $("#recentBox");
   if(!state.recent.length){ box.textContent = ""; return; }
-  box.innerHTML = `최근 결과: ${state.recent.map(x=>`<span class="badge">${x}</span>`).join(" ")}`;
+  box.innerHTML = `최근 결과: ${state.recent.map(x=>`<span style="background:#1d2a52;border:1px solid rgba(255,255,255,.08);padding:3px 8px;border-radius:999px;">${x}</span>`).join(" ")}`;
 }
 
 /* ===== Events ===== */
-document.getElementById("spinBtn").addEventListener("click", spin);
-document.getElementById("resetBtn").addEventListener("click", ()=>{
+$("#spinBtn").addEventListener("click", spin);
+$("#resetBtn").addEventListener("click", ()=>{
   if(confirm("가중치를 모두 1로 초기화할까요?")){
     state.items = FIXED_ITEMS.map((it,i)=>({ id:String(i), name:it.name, color:it.color, weight:1 }));
     drawWheel(); renderRows(); renderRecent(); saveState();
